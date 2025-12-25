@@ -7,7 +7,7 @@
 #include "config.h"
 #include "mcp_server.h"
 #include "lamp_controller.h"
-#include "led/single_led.h"
+#include "led/gpio_led.h"
 #include "assets/lang_config.h"
 
 #include <wifi_station.h>
@@ -171,7 +171,7 @@ public:
     }
 
     virtual Led* GetLed() override {
-        static SingleLed led(BUILTIN_LED_GPIO);
+        static GpioLed led(BUILTIN_LED_GPIO);
         return &led;
     }
 
