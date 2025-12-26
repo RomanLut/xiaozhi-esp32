@@ -46,16 +46,45 @@ private:
         touch_button_.OnPressUp([this]() {
             Application::GetInstance().StopListening();
         });
+        touch_button_.OnDoubleClick([this]() {
+            TurnOff();
+        });
+    }
+
+    void InitializeIdleTimer() {
+        // Initialize idle timer
+        esp_timer_create_args_t idle_timer_args = {
+            .callback = IdleTimerCallback,
+            .arg = this,
+            .dispatch_method = ESP_TIMER_TASK,
+            .name = "idle_timer",
+            .skip_unhandled_events = true
+        };
+        esp_timer_create(&idle_timer_args, &idle_timer_);
+        RestartIdleTimer();
+    }
+
+    void RestartIdleTimer() {
+        if (idle_timer_ != nullptr) {
+            esp_timer_stop(idle_timer_);
+            esp_timer_start_once(idle_timer_, IDLE_TIME_SECONDS * 1000000);
+        }
+    }
+
+    void InitializeTools() {
+        auto& mcp_server = McpServer::GetInstance();
+        mcp_server.AddTool("self.turn_off", "Позволяет выключиться,когда пользователь это просит.", PropertyList(), [this](const PropertyList& properties) -> ReturnValue {
+            ESP_LOGI(TAG, "Device turning off from MCP");
+            TurnOff();
+            return true;
+        });
     }
 
     void OnDeviceStateChanged(DeviceState previous_state, DeviceState current_state) {
         if (current_state == kDeviceStateSpeaking) {
             // Reset the idle timer when entering speaking state
             gpio_set_level(KEEP_ON_PIN, 1);  // Ensure keep-on pin is high
-            if (idle_timer_ != nullptr) {
-                esp_timer_stop(idle_timer_);
-                esp_timer_start_once(idle_timer_, IDLE_TIME_SECONDS * 1000000);
-            }
+            RestartIdleTimer();
         }
     }
 
@@ -77,19 +106,10 @@ public:
 
         gpio_set_direction(KEEP_ON_PIN, GPIO_MODE_OUTPUT);
         gpio_set_level(KEEP_ON_PIN, 1);
+        
         InitializeButtons();
 
-        // Initialize idle timer
-        esp_timer_create_args_t idle_timer_args = {
-            .callback = IdleTimerCallback,
-            .arg = this,
-            .dispatch_method = ESP_TIMER_TASK,
-            .name = "idle_timer",
-            .skip_unhandled_events = true
-        };
-        esp_timer_create(&idle_timer_args, &idle_timer_);
-
-        esp_timer_start_once(idle_timer_, IDLE_TIME_SECONDS * 1000000);
+        InitializeIdleTimer();
 
         // Register device state change callback
         DeviceStateEventManager::GetInstance().RegisterStateChangeCallback(
@@ -98,12 +118,7 @@ public:
             }
         );
 
-        auto& mcp_server = McpServer::GetInstance();
-        mcp_server.AddTool("self.turn_off", "Позволяет выключиться,когда пользователь это просит.", PropertyList(), [this](const PropertyList& properties) -> ReturnValue {
-            ESP_LOGI(TAG, "Device turning off from MCP");
-            TurnOff();
-            return true;
-        });
+        InitializeTools();
 
     }
 
