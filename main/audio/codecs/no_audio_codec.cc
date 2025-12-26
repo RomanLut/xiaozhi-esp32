@@ -469,6 +469,8 @@ int NoAudioCodecPdmWithRef::Write(const int16_t* data, int samples) {
     size_t bytes_written;
     ESP_ERROR_CHECK(i2s_channel_write(tx_handle_, buffer.data(), samples * sizeof(int32_t), &bytes_written, portMAX_DELAY));
 
+    read_pos_ = write_pos_;
+
     // Store copy for reference (AEC)
     std::lock_guard<std::mutex> ref_lock(ref_mutex_);
     for (int i = 0; i < samples; i++) {
@@ -505,6 +507,7 @@ int NoAudioCodecPdmWithRef::Read(int16_t* dest, int samples) {
     for (int i = 0; i < read_samples; i++) {
         dest[i * 2] = mic_buffer[i];  // Channel 0: Microphone
         dest[i * 2 + 1] = ref_buffer_[read_pos_];  // Channel 1: Reference
+        ref_buffer_[read_pos_] = 0;
         read_pos_ = (read_pos_ + 1) % ref_buffer_.size();
     }
     
