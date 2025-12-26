@@ -9,12 +9,15 @@
 #include "lamp_controller.h"
 #include "led/gpio_rgb_led.h"
 #include "assets/lang_config.h"
+#include "device_state_event.h"
 
 #include <wifi_station.h>
 #include <esp_log.h>
 #include <driver/i2c_master.h>
 #include <esp_lcd_panel_ops.h>
 #include <esp_lcd_panel_vendor.h>
+#include <esp_timer.h>
+#include <esp_rom_sys.h>
 
 #define TAG "FluffyBoard"
 
@@ -26,6 +29,7 @@ private:
     Display* display_ = nullptr;
     Button boot_button_;
     Button touch_button_;
+    esp_timer_handle_t idle_timer_ = nullptr;
 
     void InitializeButtons() {
         boot_button_.OnClick([this]() {
@@ -43,12 +47,55 @@ private:
         });
     }
 
+    void OnDeviceStateChanged(DeviceState previous_state, DeviceState current_state) {
+        if (current_state == kDeviceStateSpeaking) {
+            // Reset the idle timer when entering speaking state
+            gpio_set_level(KEEP_ON_PIN, 1);  // Ensure keep-on pin is high
+            if (idle_timer_ != nullptr) {
+                esp_timer_stop(idle_timer_);
+                esp_timer_start_once(idle_timer_, IDLE_TIME_SECONDS * 1000000);
+            }
+        }
+    }
+
+    void TurnOff() {
+        gpio_set_level(KEEP_ON_PIN, 0);  // Set keep-on pin low after IDLE_TIME_SECONDS of no speaking
+        static_cast<GpioRGBLed*>(GetLed())->SetBrightness(5);
+        ESP_LOGI(TAG, "Device idle for %d seconds, setting KEEP_ON_PIN low", IDLE_TIME_SECONDS);
+        esp_rom_delay_us(100000);  // Busy wait for 100ms
+    }
+
+    static void IdleTimerCallback(void* arg) {
+        ((FluffyBoard*)arg)->TurnOff();
+    }
+
 public:
     FluffyBoard() :
         boot_button_(BOOT_BUTTON_GPIO),
         touch_button_(TOUCH_BUTTON_GPIO) {
 
+        gpio_set_direction(KEEP_ON_PIN, GPIO_MODE_OUTPUT);
+        gpio_set_level(KEEP_ON_PIN, 1);
         InitializeButtons();
+
+        // Initialize idle timer
+        esp_timer_create_args_t idle_timer_args = {
+            .callback = IdleTimerCallback,
+            .arg = this,
+            .dispatch_method = ESP_TIMER_TASK,
+            .name = "idle_timer",
+            .skip_unhandled_events = true
+        };
+        esp_timer_create(&idle_timer_args, &idle_timer_);
+
+        esp_timer_start_once(idle_timer_, IDLE_TIME_SECONDS * 1000000);
+
+        // Register device state change callback
+        DeviceStateEventManager::GetInstance().RegisterStateChangeCallback(
+            [this](DeviceState previous_state, DeviceState current_state) {
+                OnDeviceStateChanged(previous_state, current_state);
+            }
+        );
     }
 
     virtual Led* GetLed() override {
@@ -73,6 +120,13 @@ public:
     virtual Display* GetDisplay() override {
         static Display* display_ = new NoDisplay();
         return display_;
+    }
+
+    ~FluffyBoard() {
+        if (idle_timer_ != nullptr) {
+            esp_timer_stop(idle_timer_);
+            esp_timer_delete(idle_timer_);
+        }
     }
 };
 
