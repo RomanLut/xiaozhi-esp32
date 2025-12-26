@@ -18,6 +18,7 @@
 #include <esp_lcd_panel_vendor.h>
 #include <esp_timer.h>
 #include <esp_rom_sys.h>
+#include <esp_sleep.h>
 
 #define TAG "FluffyBoard"
 
@@ -96,6 +97,14 @@ public:
                 OnDeviceStateChanged(previous_state, current_state);
             }
         );
+
+        auto& mcp_server = McpServer::GetInstance();
+        mcp_server.AddTool("self.turn_off", "Позволяет выключиться,когда пользователь это просит.", PropertyList(), [this](const PropertyList& properties) -> ReturnValue {
+            ESP_LOGI(TAG, "Device turning off from MCP");
+            TurnOff();
+            return true;
+        });
+
     }
 
     virtual Led* GetLed() override {
