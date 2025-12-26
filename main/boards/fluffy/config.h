@@ -28,7 +28,10 @@
 #endif
 
 
-#define BUILTIN_LED_GPIO        GPIO_NUM_3  //4 5
+#define R_LED_GPIO        GPIO_NUM_3 
+#define G_LED_GPIO        GPIO_NUM_4  
+#define B_LED_GPIO        GPIO_NUM_5  
+
 #define BOOT_BUTTON_GPIO        GPIO_NUM_0
 #define TOUCH_BUTTON_GPIO       GPIO_NUM_6
 //#define VOLUME_UP_BUTTON_GPIO   GPIO_NUM_9
@@ -45,6 +48,6 @@
 
 
 // A MCP Test: Control a lamp
-#define LAMP_GPIO GPIO_NUM_14
+//#define LAMP_GPIO GPIO_NUM_14
 
 #endif // _BOARD_CONFIG_H_

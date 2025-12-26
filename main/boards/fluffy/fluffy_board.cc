@@ -7,7 +7,8 @@
 #include "config.h"
 #include "mcp_server.h"
 #include "lamp_controller.h"
-#include "led/gpio_led.h"
+#include "led/gpio_rgb_led.h"
+//#include "led/gpio_led.h"
 #include "assets/lang_config.h"
 
 #include <wifi_station.h>
@@ -151,7 +152,7 @@ private:
 
     // 物联网初始化，逐步迁移到 MCP 协议
     void InitializeTools() {
-        static LampController lamp(LAMP_GPIO);
+//        static LampController lamp(LAMP_GPIO);
     }
 
 public:
@@ -171,7 +172,9 @@ public:
     }
 
     virtual Led* GetLed() override {
-        static GpioLed led(BUILTIN_LED_GPIO);
+        static GpioRGBLed led(R_LED_GPIO, G_LED_GPIO, B_LED_GPIO);
+//        static GpioLed led(R_LED_GPIO);
+
         return &led;
     }
 
@@ -189,7 +192,12 @@ public:
         static NoAudioCodecSimplexPdm audio_codec(AUDIO_INPUT_SAMPLE_RATE, AUDIO_OUTPUT_SAMPLE_RATE,
             AUDIO_I2S_SPK_GPIO_BCLK, AUDIO_I2S_SPK_GPIO_LRCK, AUDIO_I2S_SPK_GPIO_DOUT,
             AUDIO_I2S_MIC_GPIO_SCK, AUDIO_I2S_MIC_GPIO_DIN);
- 
+            
+/*
+        static NoAudioCodecPdmWithRef audio_codec(AUDIO_INPUT_SAMPLE_RATE, AUDIO_OUTPUT_SAMPLE_RATE,
+            AUDIO_I2S_SPK_GPIO_BCLK, AUDIO_I2S_SPK_GPIO_LRCK, AUDIO_I2S_SPK_GPIO_DOUT,
+            AUDIO_I2S_MIC_GPIO_SCK, AUDIO_I2S_MIC_GPIO_DIN);
+*/
         return &audio_codec;
     }
 

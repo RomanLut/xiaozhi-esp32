@@ -36,4 +36,19 @@ public:
     int Read(int16_t* dest, int samples);
 };
 
+class NoAudioCodecPdmWithRef : public NoAudioCodec {
+private:
+    std::vector<int16_t> ref_buffer_;
+    std::mutex ref_mutex_;
+    size_t read_pos_ = 0;
+    size_t write_pos_ = 0;
+    
+    virtual int Write(const int16_t* data, int samples) override;
+    virtual int Read(int16_t* dest, int samples) override;
+    
+public:
+    NoAudioCodecPdmWithRef(int input_sample_rate, int output_sample_rate, gpio_num_t spk_bclk, gpio_num_t spk_ws, gpio_num_t spk_dout, gpio_num_t mic_sck, gpio_num_t mic_din);
+    NoAudioCodecPdmWithRef(int input_sample_rate, int output_sample_rate, gpio_num_t spk_bclk, gpio_num_t spk_ws, gpio_num_t spk_dout, i2s_std_slot_mask_t spk_slot_mask, gpio_num_t mic_sck, gpio_num_t mic_din);
+};
+
 #endif // _NO_AUDIO_CODEC_H
