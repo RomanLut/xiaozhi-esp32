@@ -243,7 +243,7 @@ void GpioRGBLed::OnStateChanged() {
         case kDeviceStateAudioTesting:
             if (app.IsVoiceDetected()) {
                 SetBrightness(HIGH_BRIGHTNESS);
-                SetColor(0, 255, 0); // Green
+                SetColor(100, 255, 0); // Green
             } else {
                 SetBrightness(DEFAULT_BRIGHTNESS);
                 SetColor(0, 255, 0); // Green
