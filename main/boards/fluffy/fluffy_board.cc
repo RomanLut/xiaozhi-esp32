@@ -84,11 +84,11 @@ private:
 
         // Internet search tool - use this when LLM doesn't know something and needs to search for information
         mcp_server.AddTool("self.search_internet", 
-            "Search for information on the internet using DuckDuckGo. Use this tool when you don't know the answer to a question or need up-to-date information.\n"
+            "Search for information on the internet. Use this tool when you don't know the answer to a question or need up-to-date information. Do additional search qeuries based on search results if required.\n"
             "Args:\n"
             "  `query`: The search query to look up on the internet.\n"
             "Return:\n"
-            "  Search results in JSON format with relevant information.",
+            "  Search results in JSON format.",
             PropertyList({
                 Property("query", kPropertyTypeString)
             }),
