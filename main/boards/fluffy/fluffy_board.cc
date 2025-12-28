@@ -78,7 +78,7 @@ private:
 
     void InitializeTools() {
         auto& mcp_server = McpServer::GetInstance();
-        mcp_server.AddTool("self.turn_off", "Позволяет выключиться,когда пользователь это просит.", PropertyList(), [this](const PropertyList& properties) -> ReturnValue {
+        mcp_server.AddTool("self.turn_off", "Если пользователь просить отключиться или выключиться, нужно вызвать эту команду.", PropertyList(), [this](const PropertyList& properties) -> ReturnValue {
             ESP_LOGI(TAG, "Device turning off from MCP");
             TurnOff();
             return true;
@@ -94,9 +94,15 @@ private:
             PropertyList({
                 Property("query", kPropertyTypeString)
             }),
-            [](const PropertyList& properties) -> ReturnValue {
+            [this](const PropertyList& properties) -> ReturnValue {
                 auto query = properties["query"].value<std::string>();
                 ESP_LOGI(TAG, "Searching internet for: %s", query.c_str());
+
+                //indicate using LED
+                GpioRGBLed* led = static_cast<GpioRGBLed*>(GetLed());
+                led->SetBrightness(HIGH_BRIGHTNESS);
+                led->SetColor(255, 0, 255); 
+                led->StartContinuousBlink(100);
 
                 // Get Tavily API key from settings or local config
                 Settings settings("app", false);
@@ -126,14 +132,10 @@ private:
                 http->SetHeader("Content-Type", "application/json");
                 http->SetContent(std::move(body_str));
 
-                ESP_LOGI(TAG, "1");
-
                 if (!http->Open("POST", url)) {
                     ESP_LOGE(TAG, "Failed to open HTTP connection for search");
                     return std::string("Failed to connect to search service");
                 }
-
-                ESP_LOGI(TAG, "2");
 
                 int status_code = http->GetStatusCode();
                 if (status_code != 200) {
@@ -141,8 +143,6 @@ private:
                     http->Close();
                     return std::string("Search request failed with status " + std::to_string(status_code));
                 }
-
-                ESP_LOGI(TAG, "3");
 
                 ESP_LOGI(TAG, "Response length: %d",   http->GetBodyLength());
 
@@ -154,11 +154,7 @@ private:
                     response.append(buffer, len);
                 }
 
-                ESP_LOGI(TAG, "4");
-
                 http->Close();
-
-                ESP_LOGI(TAG, "5");
 
                 // Parse the Tavily response
                 cJSON* json = cJSON_Parse(response.c_str());
@@ -166,8 +162,6 @@ private:
                     ESP_LOGE(TAG, "Failed to parse search response");
                     return std::string("Failed to parse search response");
                 }
-
-                ESP_LOGI(TAG, "6");
 
                 // Extract answer
                 cJSON* answer = cJSON_GetObjectItem(json, "answer");
@@ -178,13 +172,14 @@ private:
                     answer_str = "No answer found";
                 }
 
-                ESP_LOGI(TAG, "7");
-
                 cJSON_Delete(json);
 
-                ESP_LOGI(TAG, "8");
-
                 ESP_LOGI(TAG, "Search answer: %s", answer_str.c_str());
+
+                led->SetBrightness(SPEAKING_BRIGHTNESS);
+                led->SetColor(255, 165, 0); // Orange
+                led->TurnOn();
+
                 return answer_str;
             });
     }

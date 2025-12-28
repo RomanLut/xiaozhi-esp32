@@ -1,6 +1,10 @@
 #ifndef _GPIO_RGB_LED_H_
 #define _GPIO_RGB_LED_H_
 
+#define HIGH_BRIGHTNESS 100
+#define SPEAKING_BRIGHTNESS 100
+
+
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include "led.h"
@@ -41,6 +45,8 @@ class GpioRGBLed : public Led {
     // Set overall brightness (0-100) while maintaining color ratios
     void SetBrightness(uint8_t brightness);
 
+    void StartContinuousBlink(int interval_ms);
+
  private:
     std::mutex mutex_;
     ledc_channel_config_t ledc_channel_r_ = {0};
@@ -72,7 +78,6 @@ class GpioRGBLed : public Led {
     
     void BlinkOnce();
     void Blink(int times, int interval_ms);
-    void StartContinuousBlink(int interval_ms);
 };
 
 #endif  // _GPIO_RGB_LED_H_
