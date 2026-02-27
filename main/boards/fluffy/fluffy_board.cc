@@ -7,7 +7,7 @@
 #include "config.h"
 #include "settings.h"
 #include "mcp_server.h"
-#include "lamp_controller.h"
+#include "ilink_lamp_controller.h"
 #include "led/gpio_rgb_led.h"
 #include "assets/lang_config.h"
 #include "device_state_event.h"
@@ -36,6 +36,7 @@ private:
     Button boot_button_;
     Button touch_button_;
     esp_timer_handle_t idle_timer_ = nullptr;
+    ILinkLampController* ilink_lamp_controller_ = nullptr;
 
     void InitializeButtons() {
         boot_button_.OnClick([this]() {
@@ -182,6 +183,9 @@ private:
 
                 return answer_str;
             });
+
+        // iLink BLE lamp control
+        ilink_lamp_controller_ = new ILinkLampController();
     }
 
     void OnDeviceStateChanged(DeviceState previous_state, DeviceState current_state) {
@@ -255,6 +259,7 @@ public:
             esp_timer_stop(idle_timer_);
             esp_timer_delete(idle_timer_);
         }
+        delete ilink_lamp_controller_;
     }
 };
 

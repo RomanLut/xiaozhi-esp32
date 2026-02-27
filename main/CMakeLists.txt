@@ -545,6 +545,11 @@ file(GLOB BOARD_SOURCES
 )
 list(APPEND SOURCES ${BOARD_SOURCES})
 
+# iLink implementation depends on BT component headers.
+if(NOT CONFIG_BT_ENABLED)
+    list(REMOVE_ITEM SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/boards/fluffy/iLink.cc")
+endif()
+
 # Select audio processor according to Kconfig
 if(CONFIG_USE_AUDIO_PROCESSOR)
     list(APPEND SOURCES "audio/processors/afe_audio_processor.cc")
@@ -678,9 +683,15 @@ if(CONFIG_IDF_TARGET_ESP32)
                              )
 endif()
 
+set(COMPONENT_PRIV_REQUIRES "")
+if(CONFIG_BT_ENABLED)
+    list(APPEND COMPONENT_PRIV_REQUIRES bt)
+endif()
+
 idf_component_register(SRCS ${SOURCES}
                     EMBED_FILES ${LANG_SOUNDS} ${COMMON_SOUNDS}
                     INCLUDE_DIRS ${INCLUDE_DIRS}
+                    PRIV_REQUIRES ${COMPONENT_PRIV_REQUIRES}
                     WHOLE_ARCHIVE
                     )
 
