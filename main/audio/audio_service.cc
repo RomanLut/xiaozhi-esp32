@@ -177,11 +177,33 @@ bool AudioService::ReadAudioData(std::vector<int16_t>& data, int sample_rate, in
     debug_statistics_.input_count++;
 
 #if CONFIG_USE_AUDIO_DEBUGGER
-    // 音频调试：发送原始音频数据
-    if (audio_debugger_ == nullptr) {
-        audio_debugger_ = std::make_unique<AudioDebugger>();
+    {
+        if (audio_debugger_ == nullptr) {
+            audio_debugger_ = std::make_unique<AudioDebugger>();
+        }
+        // Feed only mic channel (ch0) from interleaved data
+        int channels = codec_->input_channels();
+        if (channels > 1) {
+            std::vector<int16_t> mic_only(data.size() / channels);
+            for (size_t i = 0; i < mic_only.size(); i++) {
+                mic_only[i] = data[i * channels];
+            }
+            audio_debugger_->Feed(mic_only);
+        } else {
+            audio_debugger_->Feed(data);
+        }
+
+        int16_t mx = INT16_MIN, mn = INT16_MAX;
+        int step = codec_->input_channels();
+        for (size_t i = 0; i < data.size(); i += step) {
+            int16_t s = data[i];
+            if (s > mx) mx = s;
+            if (s < mn) mn = s;
+        }
+        if (debug_statistics_.input_count % 50 == 0) {
+            ESP_LOGI(TAG, "MIC max: %d min: %d", mx, mn);
+        }
     }
-    audio_debugger_->Feed(data);
 #endif
 
     return true;

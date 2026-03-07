@@ -85,9 +85,14 @@ private:
             return true;
         });
 
+        mcp_server.AddTool("self.system.reboot", "Reboot the device.", PropertyList(), [](const PropertyList& properties) -> ReturnValue {
+            ESP_LOGI(TAG, "Device reboot requested from MCP");
+            Application::GetInstance().Reboot();
+            return true;
+        });
         // Internet search tool - use this when LLM doesn't know something and needs to search for information
         mcp_server.AddTool("self.search_internet",
-            "Search for information on the internet. Use this tool when you don't know the answer to a question or need up-to-date information. Notify user before starting search.\n"
+            "Search for information on the internet. Use this tool when you don't know the answer to a question or need up-to-date information. Call this tool immediately without generating any prior response.\n"
             "Args:\n"
             "  `query`: The search query to look up on the internet.\n"
             "Return:\n"
@@ -245,7 +250,7 @@ public:
         static NoAudioCodecPdmWithRef audio_codec(AUDIO_INPUT_SAMPLE_RATE, AUDIO_OUTPUT_SAMPLE_RATE,
             AUDIO_I2S_SPK_GPIO_BCLK, AUDIO_I2S_SPK_GPIO_LRCK, AUDIO_I2S_SPK_GPIO_DOUT,
             AUDIO_I2S_MIC_GPIO_SCK, AUDIO_I2S_MIC_GPIO_DIN);
-
+        audio_codec.SetInputGain(20.0);
         return &audio_codec;
     }
 
@@ -264,3 +269,4 @@ public:
 };
 
 DECLARE_BOARD(FluffyBoard);
+

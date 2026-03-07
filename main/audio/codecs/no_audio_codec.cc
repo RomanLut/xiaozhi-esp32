@@ -437,7 +437,7 @@ NoAudioCodecPdmWithRef::NoAudioCodecPdmWithRef(int input_sample_rate, int output
             .clk = mic_sck,
             .din = mic_din,
             .invert_flags = {
-                .clk_inv = false,
+                .clk_inv = false,  // L/R=GND → data valid during LOW phase, sample on rising edge
             },
         },
     };
@@ -493,6 +493,14 @@ int NoAudioCodecPdmWithRef::Read(int16_t* dest, int samples) {
 
     int read_samples = bytes_read / sizeof(int16_t);
     
+    // Remove DC offset via IIR high-pass filter (~10Hz cutoff at 16kHz)
+    // dc_offset_ stores 256 * DC_estimate (accumulator avoids integer truncation fixed-point error)
+    // At steady state: dc_offset_ >> 8 == true DC mean
+    for (int i = 0; i < read_samples; i++) {
+        dc_offset_ += (int32_t)mic_buffer[i] - (dc_offset_ >> 8);
+        mic_buffer[i] = (int16_t)((int32_t)mic_buffer[i] - (dc_offset_ >> 8));
+    }
+
     // Apply gain if needed
     if (input_gain_ > 0) {
         int gain_factor = (int)input_gain_;

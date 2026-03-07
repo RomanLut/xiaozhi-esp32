@@ -42,6 +42,7 @@ private:
     std::mutex ref_mutex_;
     size_t read_pos_ = 0;
     size_t write_pos_ = 0;
+    int32_t dc_offset_ = 0;  // Accumulator: stores 256 * DC_estimate for high-pass filter
     
     virtual int Write(const int16_t* data, int samples) override;
     virtual int Read(int16_t* dest, int samples) override;
