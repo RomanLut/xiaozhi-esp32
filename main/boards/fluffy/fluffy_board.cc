@@ -24,19 +24,81 @@
 #include <esp_timer.h>
 #include <esp_rom_sys.h>
 #include <esp_sleep.h>
+#include <esp_adc/adc_oneshot.h>
+#include <esp_adc/adc_cali.h>
+#include <esp_adc/adc_cali_scheme.h>
+#include <esp_err.h>
+
+#include <algorithm>
+#include <array>
 
 #define TAG "FluffyBoard"
 
 class FluffyBoard : public WifiBoard {
 private:
+    static constexpr adc_channel_t kBatteryAdcChannel = ADC_CHANNEL_5;  // GPIO6 on ESP32-S3
+    static constexpr adc_atten_t kBatteryAdcAtten = ADC_ATTEN_DB_12;
+    static constexpr adc_bitwidth_t kBatteryAdcBitwidth = ADC_BITWIDTH_12;
+    static constexpr size_t kAdcBurstSamples = 8;
+    static constexpr size_t kAdcTrimEachSide = 5;
+    static constexpr size_t kBatteryAverageSamples = 10;
+    static constexpr float kBatteryVoltageScale = 1.5f;  // 10k(top)/20k(bottom): Vbat = Vgpio * (10k+20k)/20k
+    static constexpr uint16_t kTouchPressedMinMv = 0;
+    static constexpr uint16_t kTouchPressedMaxMv = 1000;  // <1.0V on GPIO6 means button pressed
+
     i2c_master_bus_handle_t display_i2c_bus_;
     esp_lcd_panel_io_handle_t panel_io_ = nullptr;
     esp_lcd_panel_handle_t panel_ = nullptr;
     Display* display_ = nullptr;
     Button boot_button_;
-    Button touch_button_;
+    Button* touch_button_ = nullptr;
+    adc_oneshot_unit_handle_t shared_adc_handle_ = nullptr;
+    adc_cali_handle_t adc_cali_handle_ = nullptr;
+    bool adc_calibration_enabled_ = false;
     esp_timer_handle_t idle_timer_ = nullptr;
+    esp_timer_handle_t battery_timer_ = nullptr;
+    std::array<int, kBatteryAverageSamples> battery_samples_{};
+    size_t battery_sample_count_ = 0;
+    size_t battery_sample_index_ = 0;
+    int64_t battery_sample_sum_ = 0;
     ILinkLampController* ilink_lamp_controller_ = nullptr;
+
+    void InitializeSharedAdc() {
+        adc_oneshot_unit_init_cfg_t unit_cfg = {
+            .unit_id = ADC_UNIT_1,
+            .clk_src = ADC_RTC_CLK_SRC_DEFAULT,
+            .ulp_mode = ADC_ULP_MODE_DISABLE,
+        };
+        ESP_ERROR_CHECK(adc_oneshot_new_unit(&unit_cfg, &shared_adc_handle_));
+        adc_oneshot_chan_cfg_t chan_cfg = {
+            .atten = kBatteryAdcAtten,
+            .bitwidth = kBatteryAdcBitwidth,
+        };
+        ESP_ERROR_CHECK(adc_oneshot_config_channel(shared_adc_handle_, kBatteryAdcChannel, &chan_cfg));
+        ESP_LOGI(TAG, "GPIO6 ADC configured: atten=ADC_ATTEN_DB_12, bitwidth=%d", static_cast<int>(kBatteryAdcBitwidth));
+
+        // GPIO6 is used as ADC input for both battery sensing and ADC button.
+        ESP_ERROR_CHECK(gpio_set_pull_mode(TOUCH_BUTTON_GPIO, GPIO_FLOATING));
+    }
+
+    void InitializeAdcCalibration() {
+#if ADC_CALI_SCHEME_CURVE_FITTING_SUPPORTED
+        adc_cali_curve_fitting_config_t cali_cfg = {
+            .unit_id = ADC_UNIT_1,
+            .atten = kBatteryAdcAtten,
+            .bitwidth = kBatteryAdcBitwidth,
+        };
+        esp_err_t ret = adc_cali_create_scheme_curve_fitting(&cali_cfg, &adc_cali_handle_);
+        if (ret == ESP_OK) {
+            adc_calibration_enabled_ = true;
+            ESP_LOGI(TAG, "ADC calibration enabled (curve fitting)");
+            return;
+        }
+        ESP_LOGW(TAG, "ADC calibration unavailable, fallback to approximate conversion: %s", esp_err_to_name(ret));
+#else
+        ESP_LOGW(TAG, "ADC curve fitting calibration not supported, fallback to approximate conversion");
+#endif
+    }
 
     void InitializeButtons() {
         boot_button_.OnClick([this]() {
@@ -46,13 +108,23 @@ private:
             }
             app.ToggleChatState();
         });
-        touch_button_.OnPressDown([this]() {
+
+        button_adc_config_t adc_cfg = {};
+        adc_cfg.adc_handle = &shared_adc_handle_;
+        adc_cfg.unit_id = ADC_UNIT_1;
+        adc_cfg.adc_channel = static_cast<uint8_t>(kBatteryAdcChannel);
+        adc_cfg.button_index = 0;
+        adc_cfg.min = kTouchPressedMinMv;
+        adc_cfg.max = kTouchPressedMaxMv;
+        touch_button_ = new AdcButton(adc_cfg);
+
+        touch_button_->OnPressDown([this]() {
             Application::GetInstance().StartListening();
         });
-        touch_button_.OnPressUp([this]() {
+        touch_button_->OnPressUp([this]() {
             Application::GetInstance().StopListening();
         });
-        touch_button_.OnDoubleClick([this]() {
+        touch_button_->OnDoubleClick([this]() {
             TurnOff();
         });
     }
@@ -68,6 +140,18 @@ private:
         };
         esp_timer_create(&idle_timer_args, &idle_timer_);
         RestartIdleTimer();
+    }
+
+    void InitializeBatteryMonitor() {
+        esp_timer_create_args_t battery_timer_args = {
+            .callback = BatteryTimerCallback,
+            .arg = this,
+            .dispatch_method = ESP_TIMER_TASK,
+            .name = "battery_timer",
+            .skip_unhandled_events = true
+        };
+        ESP_ERROR_CHECK(esp_timer_create(&battery_timer_args, &battery_timer_));
+        ESP_ERROR_CHECK(esp_timer_start_periodic(battery_timer_, 1000000));  // 1 second
     }
 
     void RestartIdleTimer() {
@@ -212,15 +296,118 @@ private:
         ((FluffyBoard*)arg)->TurnOff();
     }
 
+    esp_err_t ReadBatteryAdcOnce(int* adc_raw) {
+        if (shared_adc_handle_ == nullptr) {
+            return ESP_ERR_INVALID_STATE;
+        }
+        return adc_oneshot_read(shared_adc_handle_, kBatteryAdcChannel, adc_raw);
+    }
+
+    esp_err_t ReadBatteryRawAndGpioVoltageMvOnce(int* adc_raw, int* gpio_mv) {
+        esp_err_t err = ReadBatteryAdcOnce(adc_raw);
+        if (err != ESP_OK) {
+            return err;
+        }
+
+        if (adc_calibration_enabled_ && adc_cali_handle_ != nullptr) {
+            err = adc_cali_raw_to_voltage(adc_cali_handle_, *adc_raw, gpio_mv);
+            if (err == ESP_OK) {
+                return ESP_OK;
+            }
+            ESP_LOGW(TAG, "ADC calibration convert failed, fallback to approximate conversion: %s", esp_err_to_name(err));
+        }
+
+        // Approximate fallback if calibration is unavailable.
+        *gpio_mv = (*adc_raw * 3300) / 4095;
+        return ESP_OK;
+    }
+
+    void SampleBatteryGpio6() {
+        std::array<int, kAdcBurstSamples> raw_samples{};
+        std::array<int, kAdcBurstSamples> mv_samples{};
+        size_t count = 0;
+
+        for (size_t i = 0; i < kAdcBurstSamples; ++i) {
+            int adc_raw = 0;
+            int gpio_mv = 0;
+            esp_err_t err = ReadBatteryRawAndGpioVoltageMvOnce(&adc_raw, &gpio_mv);
+            if (err != ESP_OK) {
+                ESP_LOGW(TAG, "Failed to read GPIO6 ADC sample %u: %s",
+                         static_cast<unsigned>(i), esp_err_to_name(err));
+                continue;
+            }
+            raw_samples[count] = adc_raw;
+            mv_samples[count] = gpio_mv;
+            count++;
+        }
+
+        if (count == 0) {
+            ESP_LOGW(TAG, "GPIO6 ADC read failed for all samples");
+            return;
+        }
+
+        std::sort(raw_samples.begin(), raw_samples.begin() + count);
+        std::sort(mv_samples.begin(), mv_samples.begin() + count);
+
+        size_t start = 0;
+        size_t end = count;
+        if (count > (kAdcTrimEachSide * 2)) {
+            start = kAdcTrimEachSide;
+            end = count - kAdcTrimEachSide;
+        }
+
+        int64_t raw_sum = 0;
+        int64_t mv_sum = 0;
+        for (size_t i = start; i < end; ++i) {
+            raw_sum += raw_samples[i];
+            mv_sum += mv_samples[i];
+        }
+
+        size_t used = end - start;
+        int raw_avg = static_cast<int>(raw_sum / static_cast<int64_t>(used));
+        int mv_avg = static_cast<int>(mv_sum / static_cast<int64_t>(used));
+
+        // Do not let pressed-button samples affect battery estimation.
+        if (mv_avg > static_cast<int>(kTouchPressedMaxMv)) {
+            if (battery_sample_count_ < kBatteryAverageSamples) {
+                battery_samples_[battery_sample_count_] = mv_avg;
+                battery_sample_sum_ += mv_avg;
+                battery_sample_count_++;
+            } else {
+                battery_sample_sum_ -= battery_samples_[battery_sample_index_];
+                battery_samples_[battery_sample_index_] = mv_avg;
+                battery_sample_sum_ += mv_avg;
+                battery_sample_index_ = (battery_sample_index_ + 1) % kBatteryAverageSamples;
+            }
+        } else {
+            ESP_LOGI(TAG, "GPIO6 adc_raw=%d gpio_mv=%d (button pressed, skip battery sample)", raw_avg, mv_avg);
+        }
+
+        if (battery_sample_count_ == 0) {
+            ESP_LOGI(TAG, "GPIO6 adc_raw=%d battery=pending", raw_avg);
+            return;
+        }
+
+        float mv_batt_avg = static_cast<float>(battery_sample_sum_) / static_cast<float>(battery_sample_count_);
+        float battery_voltage = (mv_batt_avg / 1000.0f) * kBatteryVoltageScale;
+        ESP_LOGI(TAG, "GPIO6 adc_raw=%d battery=%.3fV", raw_avg, battery_voltage);
+    }
+
+    static void BatteryTimerCallback(void* arg) {
+        ((FluffyBoard*)arg)->SampleBatteryGpio6();
+    }
+
 public:
     FluffyBoard() :
-        boot_button_(BOOT_BUTTON_GPIO),
-        touch_button_(TOUCH_BUTTON_GPIO) {
+        boot_button_(BOOT_BUTTON_GPIO) {
 
         gpio_set_direction(KEEP_ON_PIN, GPIO_MODE_OUTPUT);
         gpio_set_level(KEEP_ON_PIN, 1);
-        
+
+        InitializeSharedAdc();
+        InitializeAdcCalibration();
         InitializeButtons();
+        InitializeBatteryMonitor();
 
         InitializeIdleTimer();
 
@@ -260,6 +447,24 @@ public:
     }
 
     ~FluffyBoard() {
+        if (touch_button_ != nullptr) {
+            delete touch_button_;
+            touch_button_ = nullptr;
+        }
+        if (battery_timer_ != nullptr) {
+            esp_timer_stop(battery_timer_);
+            esp_timer_delete(battery_timer_);
+        }
+        if (shared_adc_handle_ != nullptr) {
+            adc_oneshot_del_unit(shared_adc_handle_);
+            shared_adc_handle_ = nullptr;
+        }
+        if (adc_cali_handle_ != nullptr) {
+#if ADC_CALI_SCHEME_CURVE_FITTING_SUPPORTED
+            adc_cali_delete_scheme_curve_fitting(adc_cali_handle_);
+#endif
+            adc_cali_handle_ = nullptr;
+        }
         if (idle_timer_ != nullptr) {
             esp_timer_stop(idle_timer_);
             esp_timer_delete(idle_timer_);
