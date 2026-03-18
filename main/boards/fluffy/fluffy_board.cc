@@ -273,6 +273,52 @@ private:
                 return answer_str;
             });
 
+        mcp_server.AddTool("self.curtains.open",
+            "Open the curtains.",
+            PropertyList(),
+            [](const PropertyList& properties) -> ReturnValue {
+                const std::string url = "http://192.168.3.80/cover/curtain/open";
+                ESP_LOGI(TAG, "Sending curtain open command");
+
+                auto http = Board::GetInstance().GetNetwork()->CreateHttp(3);
+                if (!http->Open("POST", url)) {
+                    ESP_LOGE(TAG, "Failed to open HTTP connection for curtain open");
+                    return std::string("Failed to connect to curtain controller");
+                }
+
+                const int status_code = http->GetStatusCode();
+                http->Close();
+                if (status_code < 200 || status_code >= 300) {
+                    ESP_LOGE(TAG, "Curtain open command failed with status: %d", status_code);
+                    return std::string("Curtain open command failed with status " + std::to_string(status_code));
+                }
+
+                return std::string("Curtain opening command sent");
+            });
+
+        mcp_server.AddTool("self.curtains.close",
+            "Close the curtains.",
+            PropertyList(),
+            [](const PropertyList& properties) -> ReturnValue {
+                const std::string url = "http://192.168.3.80/cover/curtain/close";
+                ESP_LOGI(TAG, "Sending curtain close command");
+
+                auto http = Board::GetInstance().GetNetwork()->CreateHttp(3);
+                if (!http->Open("POST", url)) {
+                    ESP_LOGE(TAG, "Failed to open HTTP connection for curtain close");
+                    return std::string("Failed to connect to curtain controller");
+                }
+
+                const int status_code = http->GetStatusCode();
+                http->Close();
+                if (status_code < 200 || status_code >= 300) {
+                    ESP_LOGE(TAG, "Curtain close command failed with status: %d", status_code);
+                    return std::string("Curtain close command failed with status " + std::to_string(status_code));
+                }
+
+                return std::string("Curtain close command sent");
+            });
+
         // iLink BLE lamp control
         ilink_lamp_controller_ = new ILinkLampController();
     }
@@ -294,6 +340,11 @@ private:
 
     static void IdleTimerCallback(void* arg) {
         ((FluffyBoard*)arg)->TurnOff();
+        //if we are still here - we are on craddle and can not turm off
+        //restore keep on pin - toy sould no turn of when user takes it from craddle
+        gpio_set_level(KEEP_ON_PIN, 1);  
+
+        ((FluffyBoard*)arg)->RestartIdleTimer();
     }
 
     esp_err_t ReadBatteryAdcOnce(int* adc_raw) {
@@ -474,4 +525,3 @@ public:
 };
 
 DECLARE_BOARD(FluffyBoard);
-
