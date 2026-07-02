@@ -335,14 +335,17 @@ private:
         gpio_set_level(KEEP_ON_PIN, 0);  // Set keep-on pin low after IDLE_TIME_SECONDS of no speaking
         static_cast<GpioRGBLed*>(GetLed())->SetBrightness(5);
         ESP_LOGI(TAG, "Device idle for %d seconds, setting KEEP_ON_PIN low", IDLE_TIME_SECONDS);
-        esp_rom_delay_us(100000);  // Busy wait for 100ms
     }
 
     static void IdleTimerCallback(void* arg) {
         ((FluffyBoard*)arg)->TurnOff();
+
+        esp_rom_delay_us(500000);  // Busy wait for 500ms
+
         //if we are still here - we are on craddle and can not turm off
         //restore keep on pin - toy sould no turn of when user takes it from craddle
         gpio_set_level(KEEP_ON_PIN, 1);  
+        ESP_LOGI(TAG, "Surwived turnoff, restoring KEEP_ON_PIN high");
 
         ((FluffyBoard*)arg)->RestartIdleTimer();
     }
